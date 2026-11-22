@@ -600,10 +600,12 @@ int app_run(const char *api, int once, int ctrl_fd) {
   while (g_api[0] && g_api[strlen(g_api) - 1] == '/') g_api[strlen(g_api) - 1] = 0;
   app_log("ps5-trophy-share " TS_VERSION ", server %s", g_api);
 
-  for (;;) {
+  for (int wait = CHECK_SECONDS;;) {
     if (pass(ctrl_fd, &failed)) break;
     if (once) return failed ? 1 : 0;
-    if (wait_or_quit(ctrl_fd, CHECK_SECONDS)) break;
+    /* While the server cannot be reached, try less and less often (up to 5 minutes). */
+    wait = failed ? (wait * 2 > 300 ? 300 : wait * 2) : CHECK_SECONDS;
+    if (wait_or_quit(ctrl_fd, wait)) break;
   }
   app_log("a newer copy took over, bye");
   return 0;

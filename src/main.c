@@ -27,7 +27,7 @@ static int ctrl_socket(void) {
   sa.sin_port = htons(TS_CTRL_PORT);
   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-  for (int attempt = 0; attempt < 20; attempt++) {
+  for (int attempt = 0; attempt < 90; attempt++) { /* up to 45 s: the old copy may be mid-request */
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0 && listen(fd, 2) == 0) return fd;
