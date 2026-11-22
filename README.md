@@ -74,9 +74,10 @@ made-up trophies (`tests/make_fixture.py`), and runs the program against a stand
 (`tests/e2e.py`): linking with a code, the first sync, later syncs, a removed console, a key made
 by hand and an unreachable server. `tests/unit.c` checks the file readers, also against damaged files.
 
-Verified on a real PS5 (firmware 12.20): HTTPS to the server, linking, and reading a real trophy
-set. No trophy had been earned on that console, so reading earned trophies is covered by the tests
-and by a patched copy of the real file, not yet by a real earned trophy.
+Checked on a real PS5 (firmware 12.20): HTTPS from the console, linking with a code, reading a real
+trophy set and sending its trophy list, staying in the background, a second copy replacing the
+first, and the stop payload. That console had no earned trophy, so reading earned trophies is
+covered by the tests and by a patched copy of the real file, not yet by a trophy earned in a game.
 
 ## How it is put together
 
