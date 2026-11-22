@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Tests on the PC build
+        run: make test
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld llvm
+          wget -q https://github.com/ps5-payload-dev/sdk/releases/latest/download/ps5-payload-sdk.zip
+          sudo unzip -q -d /opt ps5-payload-sdk.zip
+
+      - name: Build the payload
+        run: |
+          VERSION=0.0.0-dev
+          case "$GITHUB_REF" in refs/tags/v*) VERSION="${GITHUB_REF#refs/tags/v}";; esac
+          make PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk VERSION="$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ps5-trophy-share
+          path: |
+            ps5-trophy-share.elf
+            ps5-trophy-share-stop.elf
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" ps5-trophy-share.elf ps5-trophy-share-stop.elf --title "$GITHUB_REF_NAME" --generate-notes
