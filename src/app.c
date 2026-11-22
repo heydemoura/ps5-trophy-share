@@ -27,6 +27,7 @@
 
 #include "app.h"
 #include "http.h"
+#include "icon.h"
 #include "json.h"
 #include "platform.h"
 #include "t2pd.h"
@@ -49,7 +50,11 @@ typedef struct {
   int announced;       /* the first sync was already reported on screen */
 } user_t;
 
+#define MAX_ICON_SKIP 512
+
 static char g_api[200];
+static char g_icon_skip[MAX_ICON_SKIP][16]; /* sets that turned out to have no usable picture */
+static int g_icon_nskip;
 static user_t g_users[MAX_USERS];
 static int g_nusers;
 static int g_offline_told;
@@ -363,6 +368,73 @@ static int upload_defs(const char *key, const char *np) {
   return rc == 200 ? 0 : -1;
 }
 
+static void icon_skip(const char *np) {
+  if (g_icon_nskip < MAX_ICON_SKIP) memcpy(g_icon_skip[g_icon_nskip++], np, 13);
+}
+
+/* Sends the game's picture, shrunk to a small JPEG. Asked for once per game, by the server. */
+static int upload_icon(const char *key, const char *np) {
+  char file[400], url[400], lang[16] = "", name[40], *conf, *png = NULL;
+  ucp_entry_t *entries = NULL;
+  const ucp_entry_t *e;
+  unsigned char *jpg = NULL;
+  size_t len = 0, jpg_len = 0;
+  http_res_t res;
+  int n = 0, rc = -1;
+
+  /* A set with no usable picture stays that way: do not look again on every sync. */
+  for (int i = 0; i < g_icon_nskip; i++)
+    if (!strcmp(g_icon_skip[i], np)) return -1;
+
+  if (!(conf = read_conf(np, &entries, &n))) return -1;
+  ucp_path(file, sizeof(file), np);
+  /* icon0_<language>.png: the English one, else the set's default language, else any. */
+  if (!(e = ucp_find(entries, n, "icon0_en-US.png")) && !(e = ucp_find(entries, n, "icon0.png"))) {
+    if (json_str(conf, "defaultLanguage", lang, sizeof(lang)) == 0) {
+      snprintf(name, sizeof(name), "icon0_%s.png", lang);
+      e = ucp_find(entries, n, name);
+    }
+    for (int i = 0; !e && i < n; i++)
+      if (!strncmp(entries[i].name, "icon0", 5)) e = &entries[i];
+  }
+  free(conf);
+  if (ucp_read(file, e, 8 * 1024 * 1024, &png, &len) != 0) {
+    app_log("%s: no picture in TROPHY.UCP", np);
+    free(entries);
+    icon_skip(np);
+    return -1;
+  }
+  free(entries);
+  if (icon_make((const unsigned char *)png, len, ICON_SIDE, &jpg, &jpg_len) != 0) {
+    app_log("%s: cannot read the picture (%zu bytes)", np, len);
+    free(png);
+    icon_skip(np);
+    return -1;
+  }
+  free(png);
+  snprintf(url, sizeof(url), "%s/v1/games/%s/icon", g_api, np);
+  if (http_request("PUT", url, key, "image/jpeg", jpg, jpg_len, &res) == 0) {
+    rc = res.status == 200 ? 0 : -1;
+    if (rc) app_log("PUT /v1/games/%s/icon: HTTP %d", np, res.status);
+    http_free(&res);
+  } else {
+    app_log("PUT /v1/games/%s/icon: no answer (error %d)", np, res.status);
+  }
+  if (rc == 0) app_log("%s: sent the picture (%zu bytes)", np, jpg_len);
+  free(jpg);
+  return rc;
+}
+
+/* The server lists, in "need_icon", the games it has no picture for yet. */
+static void send_icons(const char *key, const char *resp) {
+  char np[16];
+  const char *el;
+
+  if (!resp) return;
+  for (el = json_first(json_find(resp, "need_icon")); el; el = json_next(el))
+    if (json_copy(el, np, sizeof(np)) == 0 && is_np(np)) upload_icon(key, np);
+}
+
 /* ── sync ────────────────────────────────────────────────────────────────── */
 
 enum { SYNC_OK = 0, SYNC_RETRY = -1, SYNC_UNLINKED = -2 };
@@ -428,8 +500,13 @@ static int sync_user(uint32_t uid, const char *key, const setref_t *sets, int n,
   if (missing) {
     rc = post_sets(uid, key, sets, n, need, &resp2);
     if (rc >= 0) read_info(resp2, info);
-    free(resp2);
   }
+  /* Pictures last: they are the least important part and the largest. */
+  if (rc >= 0) {
+    send_icons(key, resp);
+    send_icons(key, resp2);
+  }
+  free(resp2);
   free(resp);
   return rc < 0 ? rc : SYNC_OK;
 }
@@ -577,8 +654,8 @@ static int pass(int ctrl_fd, int *failed) {
     app_log("user %08x: %d sets checked, %ld updated, %ld new trophies", u->uid, nsets, info.stored, info.fresh);
     if (!u->announced) {
       u->announced = 1;
-      plat_notify("Trophy Share\n%s: %ld %s from %ld %s on your page", info.nick[0] ? info.nick : "Done",
-                  info.trophies, info.trophies == 1 ? "trophy" : "trophies", info.games, info.games == 1 ? "game is" : "games are");
+      plat_notify("Trophy Share\n%s: %ld %s from %ld %s now on your page", info.nick[0] ? info.nick : "Done",
+                  info.trophies, info.trophies == 1 ? "trophy" : "trophies", info.games, info.games == 1 ? "game" : "games");
     }
   }
   return 0;

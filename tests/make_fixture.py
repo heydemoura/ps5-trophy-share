@@ -5,8 +5,9 @@
 
 Two users. User 10000001 has two trophy sets (one with earned trophies, one untouched),
 user 10000002 has one. The files follow the layouts described in docs/FORMATS.md.
+Each trophy set carries a real 512 x 512 PNG as its game picture.
 """
-import hashlib, json, os, struct, sys
+import hashlib, json, os, struct, sys, zlib
 
 EPOCH_US = 62135596800 * 1000000  # 0001-01-01 -> 1970-01-01, in microseconds
 BLOCK, HASH = 0x420, 0x20
@@ -64,6 +65,23 @@ def ucp(files):
     return (head + table).ljust(off, b'\0') + blob
 
 
+def png(w, h, seed=0):
+    """A real RGB PNG: a colour gradient with a darker frame."""
+    rows = b''
+    for y in range(h):
+        row = bytearray([0])  # filter: none
+        for x in range(w):
+            edge = x < w // 16 or y < h // 16 or x >= w - w // 16 or y >= h - h // 16
+            r, g, b = (x * 255 // max(1, w - 1) + seed) % 256, y * 255 // max(1, h - 1), (seed * 40 + 60) % 256
+            row += bytes((r // 4, g // 4, b // 4) if edge else (r, g, b))
+        rows += bytes(row)
+
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(rows, 6)) + chunk(b'IEND', b''))
+
+
 def trophy_set(np, title, grades, rev, langs=('en-US', 'pt-BR')):
     tid = lambda i: '%04d' % i
     conf = {
@@ -71,7 +89,7 @@ def trophy_set(np, title, grades, rev, langs=('en-US', 'pt-BR')):
         'trophyNpCommId': np, 'trophySetVersion': '1.0', 'defaultLanguage': langs[0], 'languages': list(langs),
         'trophies': [{'id': tid(i), 'hidden': i == 2, 'grade': g, 'hasReward': False} for i, g in enumerate(grades)],
     }
-    files = [('icon0_%s.png' % langs[0], b'\x89PNG\r\n\x1a\n' + bytes(64)), ('tropconf.json', json.dumps(conf).encode())]
+    files = [('icon0_%s.png' % langs[0], png(512, 512, len(grades))), ('tropconf.json', json.dumps(conf).encode())]
     for lang in langs:
         meta = {
             'schemaVersion': '0.90', 'trophyDefinitionRevision': rev, 'trophyNpCommId': np,
@@ -109,6 +127,10 @@ def main(root):
         for np, earned in sets.items():
             write('%s/user/home/%08x/trophy2/nobackup/data/%s/TRPTITLE.DAT' % (root, uid, np), t2pd(np, uid, SETS[np][1], earned))
     os.makedirs('%s/data' % root, exist_ok=True)
+    # loose pictures for the icon tests
+    write('%s/pics/square.png' % root, png(512, 512))
+    write('%s/pics/wide.png' % root, png(400, 200))
+    write('%s/pics/small.png' % root, png(64, 48))
 
 
 if __name__ == '__main__':

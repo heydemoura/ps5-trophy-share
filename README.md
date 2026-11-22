@@ -42,7 +42,8 @@ After the console restarts, send the payload again. It remembers the link, so th
 - It reads `TRPTITLE.DAT` (your progress) and `TROPHY.UCP` (the trophy list) for each PS5 game.
   [docs/FORMATS.md](docs/FORMATS.md) describes both files.
 - It sends trophy set IDs, which trophies you earned and when, and the console user's name as the
-  label of the link. The first time the server meets a game it also gets that game's trophy names.
+  label of the link. The first time the server meets a game it also gets that game's trophy names
+  and its picture, shrunk to a 192-pixel JPEG of about 10 KB.
   [docs/PROTOCOL.md](docs/PROTOCOL.md) lists every call.
 - It sends nothing else: no account IDs, no serial numbers, no save data.
 - Trophies of PS4 games played on the PS5 are stored in another, encrypted format and are not read.
@@ -72,7 +73,8 @@ make test
 This builds the same program for your PC, makes a folder that looks like a console's disk with
 made-up trophies (`tests/make_fixture.py`), and runs the program against a stand-in server
 (`tests/e2e.py`): linking with a code, the first sync, later syncs, a removed console, a key made
-by hand and an unreachable server. `tests/unit.c` checks the file readers, also against damaged files.
+by hand, game pictures and an unreachable server. `tests/unit.c` checks the file readers and the
+picture code, also against damaged files.
 
 Checked on a real PS5 (firmware 12.20): HTTPS from the console, linking with a code, reading a real
 trophy set and sending its trophy list, staying in the background, a second copy replacing the
@@ -87,6 +89,7 @@ covered by the tests and by a patched copy of the real file, not yet by a trophy
 | `src/app.c` | Linking, syncing and the watch loop |
 | `src/t2pd.c` | Reads `TRPTITLE.DAT` |
 | `src/ucp.c` | Reads `TROPHY.UCP` |
+| `src/icon.c` | Shrinks the game's picture (PNG in, small JPEG out) |
 | `src/http.c` | HTTPS client on BearSSL, with its own root certificates ([docs/CERTS.md](docs/CERTS.md)) |
 | `src/json.c` | Reads the server's answers |
 | `src/platform_ps5.c`, `src/platform_host.c` | The few things that differ between console and PC |
@@ -95,6 +98,8 @@ covered by the tests and by a patched copy of the real file, not yet by a trophy
 
 - [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) by John Törnblom.
 - [BearSSL](https://bearssl.org) by Thomas Pornin (MIT licence), in `third_party/BearSSL`.
+- [stb_image and stb_image_write](https://github.com/nothings/stb) by Sean Barrett and
+  contributors (public domain), in `third_party/stb`.
 - The meaning of the per-trophy record in `TRPTITLE.DAT` (earned flag and time) was cross-checked
   with [PS5-Suite](https://github.com/manos555555/PS5-Suite) (GPL v3).
 

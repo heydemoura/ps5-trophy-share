@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "icon.h"
 #include "json.h"
 #include "t2pd.h"
 #include "ucp.h"
@@ -125,11 +126,76 @@ static void test_json(void) {
   CHECK(json_quote(buf, sizeof(buf), "PS5 - \"Bob\"\\\t") > 0 && !strcmp(buf, "\"PS5 - \\\"Bob\\\"\\\\\\u0009\""));
 }
 
+/* Width and height from a JPEG's frame header, or 0 x 0. */
+static void jpeg_size(const unsigned char *j, size_t len, int *w, int *h) {
+  *w = *h = 0;
+  for (size_t i = 2; i + 9 < len;) {
+    if (j[i] != 0xff) return;
+    if (j[i + 1] == 0xc0 || j[i + 1] == 0xc2) {
+      *h = (j[i + 5] << 8) | j[i + 6];
+      *w = (j[i + 7] << 8) | j[i + 8];
+      return;
+    }
+    i += 2 + (size_t)((j[i + 2] << 8) | j[i + 3]);
+  }
+}
+
+static void test_icon(const char *root) {
+  char path[512];
+  unsigned char *jpg;
+  uint8_t *png;
+  size_t len, jlen;
+  int w, h;
+
+  snprintf(path, sizeof(path), "%s/pics/square.png", root);
+  png = slurp(path, &len);
+  CHECK(icon_make(png, len, ICON_SIDE, &jpg, &jlen) == 0);
+  CHECK(jlen > 400 && jlen < 40000);
+  CHECK(jpg[0] == 0xff && jpg[1] == 0xd8 && jpg[jlen - 2] == 0xff && jpg[jlen - 1] == 0xd9);
+  jpeg_size(jpg, jlen, &w, &h);
+  CHECK(w == 192 && h == 192);
+  free(jpg);
+
+  /* damaged pictures are refused, never read past their end */
+  for (size_t cut = 0; cut < len; cut += len / 23 + 1) {
+    uint8_t *copy = malloc(cut ? cut : 1);
+    memcpy(copy, png, cut);
+    if (icon_make(copy, cut, ICON_SIDE, &jpg, &jlen) == 0) free(jpg);
+    free(copy);
+  }
+  for (size_t i = 8; i < len; i += len / 61 + 1) {
+    uint8_t keep = png[i];
+    png[i] ^= 0x5a;
+    if (icon_make(png, len, ICON_SIDE, &jpg, &jlen) == 0) free(jpg);
+    png[i] = keep;
+  }
+  CHECK(icon_make((const unsigned char *)"not a picture at all", 20, ICON_SIDE, &jpg, &jlen) != 0);
+  CHECK(icon_make(png, 0, ICON_SIDE, &jpg, &jlen) != 0);
+  free(png);
+
+  snprintf(path, sizeof(path), "%s/pics/wide.png", root);
+  png = slurp(path, &len);
+  CHECK(icon_make(png, len, ICON_SIDE, &jpg, &jlen) == 0);
+  jpeg_size(jpg, jlen, &w, &h);
+  CHECK(w == 192 && h == 96); /* the shape is kept */
+  free(jpg);
+  free(png);
+
+  snprintf(path, sizeof(path), "%s/pics/small.png", root);
+  png = slurp(path, &len);
+  CHECK(icon_make(png, len, ICON_SIDE, &jpg, &jlen) == 0);
+  jpeg_size(jpg, jlen, &w, &h);
+  CHECK(w == 64 && h == 48); /* never enlarged */
+  free(jpg);
+  free(png);
+}
+
 int main(int argc, char **argv) {
   if (argc < 2) { printf("usage: unit <fake root>\n"); return 2; }
   test_t2pd(argv[1]);
   test_ucp(argv[1]);
   test_json();
+  test_icon(argv[1]);
   printf(g_fail ? "%d check(s) failed\n" : "unit tests passed\n", g_fail);
   return g_fail ? 1 : 0;
 }

@@ -95,7 +95,9 @@ Files found inside:
   `defaultLanguage`, and `trophies`: `[{ "id": "0001", "grade": "G", "hidden": true, ... }]`.
 - `tropmeta_<language>.json`, one per language (`en-US`, `pt-BR`, ...): the game's name in
   `metadata.titleMetadata.name` and each trophy's `name` and `detail` in `metadata.trophyMetadata`.
-- `icon0_<language>.png` and `tropNNNN.png`: 512 x 512 pictures. The payload does not send these.
+- `icon0_<language>.png`: the game's picture, 512 x 512. The payload sends it once per game,
+  shrunk to a 192-pixel JPEG.
+- `tropNNNN.png`: one 512 x 512 picture per trophy. The payload does not send these.
 
 The payload sends `tropconf.json` and one `tropmeta` file to the server exactly as they are, the
 first time the server meets a trophy set. It prefers `en-US`, then `en-GB`, then the set's

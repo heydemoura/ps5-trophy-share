@@ -12,7 +12,16 @@ BIN = os.path.join(HERE, '..', 'build', 'trophyshare-host')
 sys.path.insert(0, HERE)
 import make_fixture
 
-state = {'codes': {}, 'keys': {}, 'games': {}, 'synced': [], 'polls': 0, 'log': []}
+state = {'codes': {}, 'keys': {}, 'games': {}, 'icons': {}, 'synced': [], 'polls': 0, 'log': []}
+
+
+def jpeg_size(j):
+    i = 2
+    while i + 9 < len(j) and j[i] == 0xff:
+        if j[i + 1] in (0xc0, 0xc2):
+            return (j[i + 7] << 8 | j[i + 8], j[i + 5] << 8 | j[i + 6])
+        i += 2 + (j[i + 2] << 8 | j[i + 3])
+    return (0, 0)
 
 
 class Api(http.server.BaseHTTPRequestHandler):
@@ -45,7 +54,8 @@ class Api(http.server.BaseHTTPRequestHandler):
         key = auth[7:] if auth.startswith('Bearer ') else ''
         state['log'].append((self.command, self.path))
         assert self.headers.get('User-Agent', '').startswith('ps5-trophy-share/'), self.headers.get('User-Agent')
-        data = json.loads(body) if body else {}
+        picture = self.path.endswith('/icon')
+        data = json.loads(body) if body and not picture else {}
 
         if self.path == '/v1/link/start':
             code = 'ABCD%04d' % len(state['codes'])
@@ -67,11 +77,13 @@ class Api(http.server.BaseHTTPRequestHandler):
         if key not in state['keys']:
             return self.reply(401, {'ok': False, 'error': 'bad_key', 'message': 'This console is not linked any more.'})
         if self.path == '/v1/sync':
-            need, stored, fresh = [], 0, 0
+            need, need_icon, stored, fresh = [], [], 0, 0
             for s in data['sets']:
                 if s['np'] not in state['games']:
                     need.append(s['np'])
                     continue
+                if s['np'] not in state['icons']:
+                    need_icon.append(s['np'])
                 old = state['keys'][key]['earned'].get(s['np'], [])
                 if old != s['earned']:
                     stored += 1
@@ -79,10 +91,18 @@ class Api(http.server.BaseHTTPRequestHandler):
                 state['keys'][key]['earned'][s['np']] = s['earned']
             state['synced'].append(data['sets'])
             total = sum(len(e) for e in state['keys'][key]['earned'].values())
-            return self.reply(200, {'ok': True, 'need': need, 'need_icon': [], 'stored': stored, 'new_trophies': fresh,
+            return self.reply(200, {'ok': True, 'need': need, 'need_icon': need_icon, 'stored': stored, 'new_trophies': fresh,
                                     'player': {'id': '7K3M9QXZ', 'nickname': 'Téster'},
                                     'totals': {'p': 0, 'g': 1, 's': 0, 'b': total - 1, 'games': len(state['keys'][key]['earned'])},
                                     'url': 'https://site.test/u/7K3M9QXZ'}, chunked=True)
+        if self.command == 'PUT' and picture:
+            np = self.path.split('/')[3]
+            assert self.headers.get('Content-Type') == 'image/jpeg', self.headers.get('Content-Type')
+            if np == 'NPWR90002_00' and not state.get('icon_refused'):
+                state['icon_refused'] = True  # one failure: the payload must carry on and try again another time
+                return self.reply(500, {'ok': False, 'error': 'server'})
+            state['icons'][np] = body
+            return self.reply(200, {'ok': True, 'stored': True})
         if self.command == 'PUT' and self.path.startswith('/v1/games/'):
             np = self.path.split('/')[3]
             assert data['conf']['trophyNpCommId'] == np
@@ -129,7 +149,11 @@ last = {s['np']: s for s in state['synced'][-1]}
 check(last['NPWR90001_00'] == {'np': 'NPWR90001_00', 'rev': 100, 'earned': [[1, 1790000000], [4, 1790000500], [5, 1790001000]]},
       'earned trophies carry their IDs and times')
 check(last['NPWR90002_00']['earned'] == [] and last['NPWR90002_00']['rev'] == 7, 'a set with nothing earned is still sent')
-check('3 trophies from 2 games are on your page' in out, 'the first sync is reported on screen')
+check('3 trophies from 2 games now on your page' in out, 'the first sync is reported on screen')
+pic = state['icons'].get('NPWR90001_00', b'')
+check(pic[:2] == b'\xff\xd8' and jpeg_size(pic) == (192, 192), 'the game picture arrives as a 192 x 192 JPEG')
+check(len(pic) < 30000, 'and it is small (%d bytes, from a %d byte PNG)' % (len(pic), len(make_fixture.png(512, 512, 8))))
+check('NPWR90002_00' not in state['icons'] and 'on your page' in out, 'a picture the server refused does not stop the sync')
 
 check(not any('10000002' in json.dumps(s) for s in state['synced']), 'the other user was left alone')
 check(len(state['synced']) == 2, 'two sync calls: before and after describing the sets')
@@ -138,7 +162,11 @@ check(len(state['synced']) == 2, 'two sync calls: before and after describing th
 before = len(state['log'])
 out = run('10000001:Tester')
 calls = state['log'][before:]
-check(calls == [('POST', '/v1/sync')], 'a later run is a single sync call')
+check(calls == [('POST', '/v1/sync'), ('PUT', '/v1/games/NPWR90002_00/icon')], 'a later run is one sync call, plus the picture still missing')
+check(jpeg_size(state['icons'].get('NPWR90002_00', b'')) == (192, 192), 'which now arrives')
+before = len(state['log'])
+out = run('10000001:Tester')
+check(state['log'][before:] == [('POST', '/v1/sync')], 'after that a run is a single sync call')
 check('type the code' not in out, 'and shows no code')
 
 # 3. the console was removed on the site

@@ -5,7 +5,8 @@ All calls are HTTPS with JSON bodies. The default server is the one compiled in
 
 The payload sends: trophy set IDs, the IDs and times of earned trophies, the name of the console
 user (only as the label of the link, for example "PS5 - Bob"), and, once per trophy set the
-server has never seen, that set's `tropconf.json` and one `tropmeta` file. Nothing else.
+server has never seen, that set's `tropconf.json`, one `tropmeta` file and the game's picture as
+a small JPEG. Nothing else.
 
 ## Linking
 
@@ -56,6 +57,17 @@ older revision). For each one the payload sends the definitions, then syncs thos
 PUT /v1/games/NPWR12345_00
 { "lang": "en-US", "conf": <tropconf.json as it is>, "meta": <tropmeta_en-US.json as it is> }
 ```
+
+`need_icon` lists games the server knows but has no picture for. For each one the payload takes
+`icon0_<language>.png` from `TROPHY.UCP`, shrinks it so no side is longer than 192 pixels and
+sends it as JPEG (about 10 KB):
+
+```
+PUT /v1/games/NPWR12345_00/icon          Content-Type: image/jpeg
+```
+
+The first picture a game gets is kept; later ones are ignored. If this call fails the payload
+tries again at a later sync.
 
 ## When it runs
 
