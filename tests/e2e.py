@@ -130,6 +130,7 @@ check(last['NPWR90001_00'] == {'np': 'NPWR90001_00', 'rev': 100, 'earned': [[1, 
       'earned trophies carry their IDs and times')
 check(last['NPWR90002_00']['earned'] == [] and last['NPWR90002_00']['rev'] == 7, 'a set with nothing earned is still sent')
 check('3 trophies from 2 games are on your page' in out, 'the first sync is reported on screen')
+
 check(not any('10000002' in json.dumps(s) for s in state['synced']), 'the other user was left alone')
 check(len(state['synced']) == 2, 'two sync calls: before and after describing the sets')
 

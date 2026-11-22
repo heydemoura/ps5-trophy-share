@@ -577,7 +577,8 @@ static int pass(int ctrl_fd, int *failed) {
     app_log("user %08x: %d sets checked, %ld updated, %ld new trophies", u->uid, nsets, info.stored, info.fresh);
     if (!u->announced) {
       u->announced = 1;
-      plat_notify("Trophy Share\n%s: %ld trophies from %ld games are on your page", info.nick[0] ? info.nick : "Done", info.trophies, info.games);
+      plat_notify("Trophy Share\n%s: %ld %s from %ld %s on your page", info.nick[0] ? info.nick : "Done",
+                  info.trophies, info.trophies == 1 ? "trophy" : "trophies", info.games, info.games == 1 ? "game is" : "games are");
     }
   }
   return 0;
@@ -607,6 +608,6 @@ int app_run(const char *api, int once, int ctrl_fd) {
     wait = failed ? (wait * 2 > 300 ? 300 : wait * 2) : CHECK_SECONDS;
     if (wait_or_quit(ctrl_fd, wait)) break;
   }
-  app_log("a newer copy took over, bye");
+  app_log("asked to stop (a newer copy, or the stop payload), bye");
   return 0;
 }
