@@ -14,8 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      # A full clone: bearssl.org does not serve the shallow fetch that checkout would try.
+      - name: Fetch BearSSL
+        run: git submodule update --init
 
       - name: Tests on the PC build
         run: make test
