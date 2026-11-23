@@ -35,6 +35,7 @@ After the console restarts, send the payload again. It remembers the link, so th
 | Unlink | Remove the console on your page. The payload then offers a new code. |
 | Stop the payload | Send `ps5-trophy-share-stop.elf`. |
 | No way to type a code | On your page choose "Make a key by hand" and save the key on the console as `/data/trophyshare/key` (over FTP). |
+| The server moved | Nothing to do: the payload is told the new address and follows it. |
 | Something is wrong | Read `/data/trophyshare/log.txt` on the console. |
 
 ## What it reads and sends

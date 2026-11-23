@@ -2,6 +2,7 @@
 
 All calls are HTTPS with JSON bodies. The default server is the one compiled in
 (`API_URL` in the Makefile). To use another, write its address in `/data/trophyshare/api`.
+The server can also announce a new address of its own; see "When the server changes address".
 
 The payload sends: trophy set IDs, the IDs and times of earned trophies, the name of the console
 user (only as the label of the link, for example "PS5 - Bob"), and, once per trophy set the
@@ -68,6 +69,17 @@ PUT /v1/games/NPWR12345_00/icon          Content-Type: image/jpeg
 
 The first picture a game gets is kept; later ones are ignored. If this call fails the payload
 tries again at a later sync.
+
+## When the server changes address
+
+Any answer to the payload may carry `"moved": "https://new.address"`. The payload then writes
+that address to `/data/trophyshare/moved` and uses it for every later call, including after a
+restart. So the server can move without a new payload.
+
+- Only an address starting with `https://` is accepted.
+- If the new address stops answering, the payload deletes the file and goes back to the address
+  it was built with.
+- If you wrote an address by hand in `/data/trophyshare/api`, it is used as it is and never replaced.
 
 ## When it runs
 

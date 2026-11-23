@@ -3,7 +3,7 @@
 #   make host            the same program for a PC, reading a fake console folder
 #   make test            unit tests + a run against a local stand-in server
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 # Where the payload sends trophies. Override to point a build at your own server.
 API_URL ?= https://trophy-share-api.tcgalters.workers.dev
 

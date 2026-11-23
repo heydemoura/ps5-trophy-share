@@ -52,7 +52,10 @@ typedef struct {
 
 #define MAX_ICON_SKIP 512
 
-static char g_api[200];
+static char g_api[200];         /* the server address in use */
+static char g_api_builtin[200]; /* the one this payload was built with */
+static int g_api_from;          /* where g_api came from: API_BUILTIN, API_MOVED or API_MANUAL */
+enum { API_BUILTIN = 0, API_MOVED = 1, API_MANUAL = 2 };
 static char g_icon_skip[MAX_ICON_SKIP][16]; /* sets that turned out to have no usable picture */
 static int g_icon_nskip;
 static user_t g_users[MAX_USERS];
@@ -202,17 +205,59 @@ static int wait_or_quit(int ctrl_fd, int seconds) {
 
 /* ── the server ──────────────────────────────────────────────────────────── */
 
+static void api_set(char *dst, const char *url) {
+  snprintf(dst, sizeof(g_api), "%s", url);
+  while (dst[0] && dst[strlen(dst) - 1] == '/') dst[strlen(dst) - 1] = 0;
+}
+
+/* A new address is only taken over HTTPS (plain HTTP only between two test servers). */
+static int api_acceptable(const char *to) {
+  if (strlen(to) < 12 || strlen(to) > 150) return 0;
+  if (!strncmp(to, "https://", 8)) return 1;
+  return !strncmp(to, "http://", 7) && !strncmp(g_api, "http://", 7);
+}
+
+/* The server can say it has a new address ("moved" in an answer). The payload remembers
+ * it in DATA/moved and uses it from then on, so an address change needs no new download.
+ * An address written by hand in DATA/api is never replaced. */
+static void follow_move(const char *resp) {
+  char to[200], file[300];
+
+  if (g_api_from == API_MANUAL || json_str(resp, "moved", to, sizeof(to)) != 0) return;
+  while (to[0] && to[strlen(to) - 1] == '/') to[strlen(to) - 1] = 0;
+  if (!strcmp(to, g_api) || !api_acceptable(to)) return;
+  app_log("the server moved to %s", to);
+  path(file, sizeof(file), DATA "/moved");
+  write_line(file, to);
+  api_set(g_api, to);
+  g_api_from = API_MOVED;
+}
+
 /* One JSON call. Returns the HTTP status (body in *out, to be freed) or -1. */
 static int call(const char *method, const char *route, const char *key, const char *body, size_t len, char **out) {
-  char url[400];
+  char url[400], file[300];
   http_res_t res;
+  int rc;
 
   if (out) *out = NULL;
   snprintf(url, sizeof(url), "%s%s", g_api, route);
-  if (http_request(method, url, key, body ? "application/json" : NULL, body, len, &res) != 0) {
+  rc = http_request(method, url, key, body ? "application/json" : NULL, body, len, &res);
+  if (rc != 0 && g_api_from == API_MOVED) {
+    /* The address we were sent to does not answer: go back to the one we were built
+     * with. If the move was real, that server will tell us again. */
+    app_log("%s does not answer (error %d), going back to %s", g_api, res.status, g_api_builtin);
+    path(file, sizeof(file), DATA "/moved");
+    unlink(file);
+    api_set(g_api, g_api_builtin);
+    g_api_from = API_BUILTIN;
+    snprintf(url, sizeof(url), "%s%s", g_api, route);
+    rc = http_request(method, url, key, body ? "application/json" : NULL, body, len, &res);
+  }
+  if (rc != 0) {
     app_log("%s %s: no answer (error %d)", method, route, res.status);
     return -1;
   }
+  if (res.status == 200) follow_move(res.body);
   if (res.status != 200) {
     char msg[160] = "";
     json_str(res.body, "message", msg, sizeof(msg));
@@ -672,10 +717,22 @@ int app_run(const char *api, int once, int ctrl_fd) {
   path(dir, sizeof(dir), DATA "/keys");
   mkdir(dir, 0700);
 
-  /* DATA/api holds another server address: for people who run their own. */
+  /* Which server: an address written by hand in DATA/api (for people who run their
+   * own), else the address the server last moved to (DATA/moved), else the built-in one. */
+  api_set(g_api_builtin, api);
+  api_set(g_api, api);
+  g_api_from = API_BUILTIN;
   path(file, sizeof(file), DATA "/api");
-  snprintf(g_api, sizeof(g_api), "%s", read_line(file, custom, sizeof(custom)) == 0 ? custom : api);
-  while (g_api[0] && g_api[strlen(g_api) - 1] == '/') g_api[strlen(g_api) - 1] = 0;
+  if (read_line(file, custom, sizeof(custom)) == 0) {
+    api_set(g_api, custom);
+    g_api_from = API_MANUAL;
+  } else {
+    path(file, sizeof(file), DATA "/moved");
+    if (read_line(file, custom, sizeof(custom)) == 0 && api_acceptable(custom)) {
+      api_set(g_api, custom);
+      g_api_from = API_MOVED;
+    }
+  }
   app_log("ps5-trophy-share " TS_VERSION ", server %s", g_api);
 
   for (int wait = CHECK_SECONDS;;) {

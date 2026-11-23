@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Runs the PC build of the payload against a stand-in server and a fake console folder.
 
-Covers the whole conversation: link code -> key, sync, "send me this trophy set",
-second sync, a revoked key, and a manually installed key.
+Covers the whole conversation: link code -> key, sync, "send me this trophy set" and its
+picture, later syncs, a revoked key, a manually installed key, and the server changing address.
 """
 import http.server, json, os, shutil, subprocess, sys, threading
 
@@ -12,7 +12,7 @@ BIN = os.path.join(HERE, '..', 'build', 'trophyshare-host')
 sys.path.insert(0, HERE)
 import make_fixture
 
-state = {'codes': {}, 'keys': {}, 'games': {}, 'icons': {}, 'synced': [], 'polls': 0, 'log': []}
+state = {'codes': {}, 'keys': {}, 'games': {}, 'icons': {}, 'synced': [], 'polls': 0, 'log': [], 'via': [], 'moved': None}
 
 
 def jpeg_size(j):
@@ -26,11 +26,14 @@ def jpeg_size(j):
 
 class Api(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
+    name = 'A'  # the address the payload was built with; ApiB below is "the new address"
 
     def log_message(self, *a):
         pass
 
     def reply(self, status, obj, chunked=False):
+        if status == 200 and self.name == 'A' and state['moved']:
+            obj = dict(obj, moved=state['moved'])  # "I have a new address"
         data = json.dumps(obj).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
@@ -53,6 +56,7 @@ class Api(http.server.BaseHTTPRequestHandler):
         auth = self.headers.get('Authorization', '')
         key = auth[7:] if auth.startswith('Bearer ') else ''
         state['log'].append((self.command, self.path))
+        state['via'].append(self.name)
         assert self.headers.get('User-Agent', '').startswith('ps5-trophy-share/'), self.headers.get('User-Agent')
         picture = self.path.endswith('/icon')
         data = json.loads(body) if body and not picture else {}
@@ -111,6 +115,10 @@ class Api(http.server.BaseHTTPRequestHandler):
         return self.reply(404, {'ok': False, 'error': 'not_found'})
 
     do_GET = do_POST = do_PUT = handle_any
+
+
+class ApiB(Api):
+    name = 'B'
 
 
 def run(user, expect=0):
@@ -184,7 +192,41 @@ check(not os.path.exists(os.path.join(ROOT, 'data/trophyshare/key')), 'and the l
 check(state['keys']['tsk_by_hand']['earned'] == {'NPWR90003_00': [[0, 1791000000]]}, 'that user\'s trophies were sent')
 check(state['games']['NPWR90003_00']['lang'] == 'en-GB', 'British English counts as English')
 
-# 5. the server is down
+# 5. the server gets a new address: the old one says so and the console follows
+server_b = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ApiB)
+threading.Thread(target=server_b.serve_forever, daemon=True).start()
+B = 'http://127.0.0.1:%d' % server_b.server_address[1]
+moved_file = os.path.join(ROOT, 'data/trophyshare/moved')
+state['moved'] = 'ftp://somewhere.else/'
+run('10000002:Second')
+check(not os.path.exists(moved_file), 'an address that is not a web address is ignored')
+state['moved'] = B + '/'
+mark = len(state['via'])
+out = run('10000002:Second')
+check(state['via'][mark:] == ['A'] and open(moved_file).read().strip() == B, 'the old address announces the new one, and it is remembered')
+mark = len(state['via'])
+out = run('10000002:Second')
+check(state['via'][mark:] == ['B'] and B in out, 'the next run talks only to the new address')
+
+# 6. the new address stops answering: back to the address the payload was built with
+server_b.shutdown()
+server_b.server_close()
+state['moved'] = None
+mark = len(state['via'])
+out = run('10000002:Second')
+check(state['via'][mark:] == ['A'] and not os.path.exists(moved_file), 'a dead new address sends the payload back to its own')
+
+# 7. an address written by hand is never replaced
+state['moved'] = B
+with open(os.path.join(ROOT, 'data/trophyshare/api'), 'w') as f:
+    f.write('http://127.0.0.1:%d\n' % PORT)
+mark = len(state['via'])
+run('10000002:Second')
+check(state['via'][mark:] == ['A'] and not os.path.exists(moved_file), 'an address written by hand stays')
+os.remove(os.path.join(ROOT, 'data/trophyshare/api'))
+state['moved'] = None
+
+# 8. the server is down
 server.shutdown()
 server.server_close()
 out = run('10000002:Second', expect=1)
